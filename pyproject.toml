@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "youtube-downloader"
+version = "0.1.0"
+description = "Local FastAPI service and minimal UI for one-shot YouTube downloads via yt-dlp."
+authors = []
+packages = [
+  { include = "yt_downloader", from = "src" }
+]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.0"
+uvicorn = { extras = ["standard"], version = "^0.30.0" }
+yt-dlp = "*"
+pydantic = "^2.4.0"
+pydantic-settings = "^2.4.0"
+
+[tool.poetry.group.dev.dependencies]
+httpx = "^0.27.0"
+
+[build-system]
+requires = ["poetry-core>=1.5.0"]
+build-backend = "poetry.core.masonry.api"
