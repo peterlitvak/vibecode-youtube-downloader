@@ -12,7 +12,14 @@ from typing import Any
 
 
 class JsonFormatter(logging.Formatter):
-    """A simple JSON log formatter."""
+    """A simple JSON log formatter.
+
+    Notes
+    -----
+    - Timestamps are rendered in UTC using ISO-8601 for easier log aggregation.
+    - Includes basic context (logger name, module, function, line).
+    - If ``exc_info`` is present, the exception is serialized into the payload.
+    """
 
     def format(self, record: logging.LogRecord) -> str:
         """Format a log record as a JSON string.
@@ -49,6 +56,12 @@ def setup_logging(debug: bool) -> None:
     ----------
     debug: bool
         Whether to set the root logger to DEBUG level.
+    
+    Notes
+    -----
+    - Replaces existing root handlers to avoid duplicate lines in certain run modes.
+    - Aligns Uvicorn loggers with the chosen level; ``uvicorn.access`` is lowered to
+      WARNING when not in debug to reduce noise.
     """
 
     level: int = logging.DEBUG if debug else logging.INFO

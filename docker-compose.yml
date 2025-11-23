@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    container_name: vibecode-youtube-downloader
+    ports:
+      - "8000:8000"
+    environment:
+      - DOWNLOADS_HOST_DIR=${DOWNLOADS_HOST_DIR:-${HOME}/Downloads/ytdl}
+      - YTD_CONCURRENT_FRAGMENTS=${YTD_CONCURRENT_FRAGMENTS:-5}
+    volumes:
+      - "${DOWNLOADS_HOST_DIR:-${HOME}/Downloads/ytdl}:/downloads"
+    restart: unless-stopped

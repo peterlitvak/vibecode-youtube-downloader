@@ -19,13 +19,12 @@ _SRC_PATH: Path = _PROJECT_ROOT / "src"
 if str(_SRC_PATH) not in sys.path:
     sys.path.insert(0, str(_SRC_PATH))
 
-# Configure temporary download directory and allowed base before importing the app
+# Configure a temporary directory for ad-hoc writes if needed by tests
 _TEST_DL_DIR: Path = Path(tempfile.mkdtemp(prefix="ytdl_test_dl_"))
-os.environ["YTD_ALLOWED_BASE_DIR"] = str(_TEST_DL_DIR)
-os.environ["YTD_DEFAULT_DOWNLOAD_DIR"] = str(_TEST_DL_DIR)
 
 from fastapi.testclient import TestClient  # type: ignore  # imported after sys.path tweak
-from yt_downloader.main import app  # type: ignore  # imported after sys.path tweak
+from yt_downloader.core.config import get_settings  # type: ignore
+from yt_downloader.main import create_app  # type: ignore  # imported after sys.path tweak
 
 
 class TestIntegration(unittest.TestCase):
@@ -33,9 +32,10 @@ class TestIntegration(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        """Create a test client once for all tests."""
+        """Create a fresh app and client for this test class."""
 
-        cls.client: TestClient = TestClient(app)
+        get_settings.cache_clear()  # type: ignore[attr-defined]
+        cls.client: TestClient = TestClient(create_app())
 
     def test_health_endpoint(self) -> None:
         """GET /health returns an ok status payload."""
@@ -95,7 +95,6 @@ class TestIntegration(unittest.TestCase):
         payload: dict[str, str] = {
             "url": url,
             "formatId": format_selector,
-            "targetDir": str(_TEST_DL_DIR),
         }
 
         start = self.client.post("/api/download", json=payload)

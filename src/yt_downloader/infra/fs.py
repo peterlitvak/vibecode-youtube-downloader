@@ -22,6 +22,13 @@ def resolve_target_dir(path_str: Optional[str], settings: Settings) -> Path:
     Path
         A resolved directory path that exists and is writable (creation attempted).
 
+    Notes
+    -----
+    - Sandboxes writes under ``settings.allowed_base_dir`` via ``Path.relative_to`` to
+      prevent escaping the approved area (e.g., ".." traversal or absolute paths).
+    - Expands user input with ``expanduser()`` and ``resolve()`` before checks.
+    - Creates the directory when missing; raises if the final path is not a directory.
+
     Raises
     ------
     ValueError
@@ -44,3 +51,42 @@ def resolve_target_dir(path_str: Optional[str], settings: Settings) -> Path:
         raise ValueError("Target path is not a directory")
 
     return target
+
+
+def to_host_display_path(container_path: Path | None, settings: Settings) -> Path | None:
+    """Translate a container path to a host-visible path for display/copy.
+
+    Parameters
+    ----------
+    container_path: Path | None
+        The file path inside the container (e.g., ``/downloads/video.mp4``).
+    settings: Settings
+        Application settings with ``allowed_base_dir`` and optional ``host_downloads_dir``.
+
+    Returns
+    -------
+    Path | None
+        The corresponding host path if mapping is configured; otherwise ``None``.
+
+    Notes
+    -----
+    - When running in Docker, the app writes into ``allowed_base_dir`` (e.g., ``/downloads``)
+      which is bind-mounted to a host directory (e.g., ``~/Downloads/ytdl``). If
+      ``host_downloads_dir`` is set, this function returns the equivalent host path by
+      computing the relative path from ``allowed_base_dir`` to the file and joining it to
+      ``host_downloads_dir``.
+    - Returns ``None`` when any input is missing or the file is outside the allowed base.
+    """
+
+    if container_path is None:
+        return None
+    host_root = settings.host_downloads_dir
+    if host_root is None:
+        return None
+
+    base = settings.allowed_base_dir.expanduser().resolve()
+    try:
+        rel = container_path.expanduser().resolve().relative_to(base)
+    except Exception:
+        return None
+    return host_root.expanduser().resolve() / rel

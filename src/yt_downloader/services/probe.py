@@ -10,13 +10,27 @@ from yt_downloader.domain.probe import FormatInfo, ProbeResponse
 
 
 def _build_resolution(height: Optional[int]) -> Optional[str]:
-    """Build a human-readable resolution string."""
+    """Build a human-readable resolution string.
+
+    Notes
+    -----
+    - Returns strings like ``"1080p"`` when ``height`` is known; otherwise ``None``.
+    - Used for UI display and for ordering formats by visual quality.
+    """
 
     return f"{height}p" if height else None
 
 
 def _normalize_format(fmt: dict[str, Any]) -> FormatInfo:
-    """Normalize a yt-dlp format dict to FormatInfo."""
+    """Normalize a yt-dlp format dict to FormatInfo.
+
+    Notes
+    -----
+    - Preserves yt-dlp semantics for codecs: the literal string ``"none"`` means
+      the stream lacks that track.
+    - ``note`` combines ``format_note`` or a compact ``format`` label for readability.
+    - ``id`` is always coerced to ``str`` to simplify UI handling.
+    """
 
     fmt_id: str = str(fmt.get("format_id", ""))
     height: Optional[int] = fmt.get("height")
@@ -39,7 +53,13 @@ def _normalize_format(fmt: dict[str, Any]) -> FormatInfo:
 
 
 def _validate_url(url: str) -> None:
-    """Validate URL has a supported scheme and netloc."""
+    """Validate URL has a supported scheme and netloc.
+
+    Notes
+    -----
+    - Accepts only ``http`` and ``https`` schemes with a non-empty host.
+    - Raises ``ValueError`` early to avoid invoking yt-dlp on malformed input.
+    """
 
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -58,6 +78,12 @@ def probe_video(url: str) -> ProbeResponse:
     -------
     ProbeResponse
         Normalized metadata and list of available formats.
+
+    Notes
+    -----
+    - Does not filter to progressive formats; the UI applies that filter so users
+      can still choose combined selectors when needed.
+    - Formats are sorted descending by height and fps to surface likely best quality first.
     """
 
     _validate_url(url)

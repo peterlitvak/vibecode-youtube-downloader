@@ -2,18 +2,25 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any, Optional
 
 from yt_dlp import YoutubeDL
 
-from yt_downloader.core.config import Settings
+from yt_downloader.core.config import Settings, get_settings
 from yt_downloader.domain.jobs import Job, JobManager, JobStatus
+from yt_downloader.infra.fs import to_host_display_path
 
 
 def _safe_percent(downloaded: int, total: Optional[int]) -> float:
-    """Compute percentage safely."""
+    """Compute a clamped 0–100 percentage.
+
+    Notes
+    -----
+    - Returns 0.0 when ``total`` is unknown or non-positive.
+    - Clamps results to the inclusive range [0, 100] to avoid jitter.
+    """
 
     if not total or total <= 0:
         return 0.0
@@ -21,7 +28,15 @@ def _safe_percent(downloaded: int, total: Optional[int]) -> float:
 
 
 def _build_base_outtmpl(target_dir: Path) -> str:
-    """Build a base outtmpl with title/id and resolution/FPS tokens."""
+    """Build a base outtmpl with title/id and resolution/FPS tokens.
+
+    Notes
+    -----
+    - The pattern includes height/fps tokens that may be missing for some videos.
+    - We first call ``prepare_filename`` to render a concrete path, then remove
+      "None" placeholders with ``_cleanup_missing_tokens`` before using it as a
+      stable ``outtmpl`` for the actual download.
+    """
 
     # Include height and fps tokens; we'll resolve to a concrete path via prepare_filename
     # and then clean up missing tokens (None) before using a static outtmpl for download.
@@ -29,7 +44,13 @@ def _build_base_outtmpl(target_dir: Path) -> str:
 
 
 def _cleanup_missing_tokens(path: Path) -> Path:
-    """Remove placeholders that became 'None' after prepare_filename."""
+    """Remove placeholders that became "None" after prepare_filename.
+
+    Notes
+    -----
+    - Also normalizes repeated dashes that may appear during cleanup.
+    - Does not touch the directory portion of the path.
+    """
 
     s: str = str(path)
     s = s.replace("-Nonep", "")
@@ -41,7 +62,13 @@ def _cleanup_missing_tokens(path: Path) -> Path:
 
 
 def _unique_path(p: Path) -> Path:
-    """Return a unique path by appending ' (n)' if the file already exists."""
+    """Return a unique path by appending " (n)" if the file already exists.
+
+    Notes
+    -----
+    - This mirrors common OS behavior to avoid accidental overwrites.
+    - Only the file name is modified; the parent directory is preserved.
+    """
 
     if not p.exists():
         return p
@@ -57,7 +84,14 @@ def _unique_path(p: Path) -> Path:
 
 
 def _compute_final_outfile(url: str, format_selector: str, target_dir: Path) -> Path:
-    """Use yt-dlp to render the final output file path and ensure uniqueness."""
+    """Use yt-dlp to render the final output file path and ensure uniqueness.
+
+    Notes
+    -----
+    - Delegates path rendering to yt-dlp via ``prepare_filename`` for correctness
+      (escaping, metadata tokens). Then cleans missing tokens and ensures the
+      path is unique on disk with ``_unique_path``.
+    """
 
     base_tmpl: str = _build_base_outtmpl(target_dir)
     probe_opts: dict[str, Any] = {
@@ -94,7 +128,8 @@ def _compose_format(url: str, user_selector: str) -> str:
     Returns
     -------
     str
-        A format selector string suitable for yt-dlp.
+        A selector suitable for yt-dlp. Falls back to ``"{itag}+bestaudio/best"``
+        when probing fails or the selected itag lacks audio.
     """
 
     if "+" in user_selector or "/" in user_selector:
@@ -125,7 +160,7 @@ def _compose_format(url: str, user_selector: str) -> str:
     return user_selector
 
 
-async def run_download(job: Job, manager: JobManager, settings: Settings) -> None:
+async def run_download(job: Job, manager: JobManager) -> None:
     """Run the download using yt-dlp in a background thread and stream progress.
 
     Parameters
@@ -134,40 +169,45 @@ async def run_download(job: Job, manager: JobManager, settings: Settings) -> Non
         The job to execute.
     manager: JobManager
         In-memory job manager to broadcast progress.
-    settings: Settings
-        Application settings.
+    
+    Notes
+    -----
+    - Progress semantics: we emit overall percent based on yt-dlp fragment indices
+      to guarantee monotonic growth (prevents regressions when total bytes are unknown).
+    - Broadcast messages:
+      - ``{"type":"status","status": <JobStatus>}`` upon job start.
+      - ``{"type":"progress","progressPercent": float, "bytesDownloaded": int, "totalBytes": Optional[int], "speed": Optional[float], "eta": Optional[int]}`` during download.
+      - ``{"type":"complete","filePath": Optional[str], "progressPercent": 100.0}`` on success.
+      - ``{"type":"error","error": str, "progressPercent": float}`` on failure.
+    - Finalization: the hook marks the job as succeeded when yt-dlp reports
+      "finished"; if yt-dlp completes without that hook firing, we finalize after
+      the blocking call to ensure tests/UI observe a terminal state.
     """
 
     loop = asyncio.get_running_loop()
+    settings: Settings = get_settings()
 
     def hook(d: dict[str, Any]) -> None:
         status: str = d.get("status", "")
         if status == "downloading":
             downloaded: int = int(d.get("downloaded_bytes") or 0)
+            fragment_index: int = int(d.get("fragment_index") or 0)
+            fragment_count: int = int(d.get("fragment_count") or 0)
             total_val = d.get("total_bytes") or d.get("total_bytes_estimate")
             total: Optional[int] = int(total_val) if total_val is not None else None
             job.bytes_downloaded = downloaded
             job.total_bytes = total
-            # Compute progress percent; if total is unknown, fall back to elapsed/eta estimation
-            percent: float = _safe_percent(downloaded, total)
-            if (not total) or total <= 0:
-                try:
-                    elapsed = float(d.get("elapsed")) if d.get("elapsed") is not None else None
-                    eta = float(d.get("eta")) if d.get("eta") is not None else None
-                    # Only use ETA-based estimate when ETA is positive to avoid 100% spikes
-                    if elapsed is not None and eta is not None and eta > 0 and (elapsed + eta) > 0:
-                        est = (elapsed / (elapsed + eta)) * 100.0
-                        # Never exceed 99% until final completion to avoid premature 100%
-                        est = min(est, 99.0)
-                        # Monotonic: do not regress
-                        if est > percent:
-                            percent = est
-                except Exception:
-                    pass
+            percent = (
+                max(0.0, min(_safe_percent(fragment_index, fragment_count), 100.0))
+                if fragment_count > 1
+                else max(0.0, min(_safe_percent(downloaded, total), 100.0))
+            )
+
             # Monotonic overall
             if percent < job.progress_percent:
                 percent = job.progress_percent
             job.progress_percent = percent
+
             # Fire and forget broadcast from worker thread
             asyncio.run_coroutine_threadsafe(
                 manager.broadcast(
@@ -191,12 +231,14 @@ async def run_download(job: Job, manager: JobManager, settings: Settings) -> Non
             # Mark as complete
             job.progress_percent = 100.0
             job.status = JobStatus.SUCCEEDED
+            host_path = to_host_display_path(job.file_path, settings)
             asyncio.run_coroutine_threadsafe(
                 manager.broadcast(
                     job.id,
                     {
                         "type": "complete",
                         "filePath": str(job.file_path) if job.file_path else None,
+                        "hostFilePath": str(host_path) if host_path else None,
                         "progressPercent": 100.0,
                     },
                 ),
@@ -215,9 +257,15 @@ async def run_download(job: Job, manager: JobManager, settings: Settings) -> Non
         "outtmpl": str(final_outfile),
         "merge_output_format": "mp4",
         "progress_hooks": [hook],
+        "concurrent_fragment_downloads": settings.concurrent_fragments,
     }
 
     job.status = JobStatus.RUNNING
+    job.progress_percent = 0.0
+    job.bytes_downloaded = 0
+    job.total_bytes = None
+    job.error = None
+    job.file_path = None
     await manager.broadcast(job.id, {"type": "status", "status": job.status})
 
     def _blocking() -> None:
@@ -231,11 +279,13 @@ async def run_download(job: Job, manager: JobManager, settings: Settings) -> Non
         if job.status == JobStatus.RUNNING:
             job.status = JobStatus.SUCCEEDED
             job.progress_percent = 100.0  # Ensure progress is 100%
+            host_path2 = to_host_display_path(job.file_path, settings)
             await manager.broadcast(
                 job.id,
                 {
                     "type": "complete",
                     "filePath": str(job.file_path) if job.file_path else None,
+                    "hostFilePath": str(host_path2) if host_path2 else None,
                     "progressPercent": 100.0,
                 },
             )
