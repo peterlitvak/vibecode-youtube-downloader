@@ -9,9 +9,10 @@
 
 ## 2) Technology choices
 
-- Backend runtime: Python 3.11+
+- Backend runtime: Python 3.11
 - Web framework: FastAPI (ASGI) + Uvicorn
 - Download engine: yt-dlp (actively maintained fork of youtube-dl), using Python API
+- YouTube JS challenge runtime: packaged Deno plus yt-dlp EJS scripts installed via Poetry extras
 - Media tools: ffmpeg (required by yt-dlp for muxing/merging)
 - Background execution: asyncio.create_task; progress hooks mapped to domain events
 - Realtime updates: WebSocket (FastAPI) for progress streaming
@@ -34,6 +35,7 @@
     - domain/probe.py – Probe models
     - services/probe.py – fetch available formats/metadata via yt-dlp (download=False)
     - services/downloader.py – yt-dlp orchestration, progress hooks, audio merge fallback, unique filenames
+    - services/ytdlp_options.py – shared yt-dlp defaults, including enabled JavaScript runtimes
     - infra/fs.py – resolve_target_dir (sandboxed) and to_host_display_path (container→host mapping)
     - api/http.py – REST endpoints (probe, start download, job status)
     - api/ws.py – WebSocket endpoint for live progress events (sends hostFilePath when available)
@@ -50,6 +52,7 @@
 / src/yt_downloader/domain/probe.py
 / src/yt_downloader/services/probe.py
 / src/yt_downloader/services/downloader.py
+/ src/yt_downloader/services/ytdlp_options.py
 / src/yt_downloader/infra/fs.py
 / src/yt_downloader/api/http.py
 / src/yt_downloader/api/ws.py
@@ -121,6 +124,7 @@ Notes
     - `merge_output_format`: mp4/mkv
     - `outtmpl`: built to include useful tokens; collisions get a numeric suffix to ensure uniqueness
     - `progress_hooks`: [progress_mapper]
+    - `js_runtimes`: enables packaged Deno first, with node/quickjs/bun as fallbacks when available
     - Audio presence: if the selected format is video-only, automatically combine with bestaudio (e.g.,
       `<formatId>+bestaudio/best`) to ensure the final file has sound
 5) Progress updates: push via WS (no storage)
@@ -148,7 +152,7 @@ Notes
 - Python dependencies (managed via Poetry/pyproject.toml):
     - fastapi
     - uvicorn[standard]
-    - yt-dlp
+    - yt-dlp[default,deno] (includes packaged Deno/EJS support for YouTube JS challenges)
     - pydantic
     - pydantic-settings
 
@@ -181,4 +185,4 @@ Notes
 - Local: user can select quality and an editable target directory; download succeeds under the allowed base
 - Docker: target directory is read-only and reflects the mounted host directory; downloads land on the host
 - Progress is visible, errors are actionable, and the final host-visible file path is shown
-- No API keys required; ffmpeg is the only system dependency
+- No API keys required; ffmpeg is the only required system media dependency
