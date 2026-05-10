@@ -95,6 +95,39 @@
         alertContainer.appendChild(wrapper);
     };
 
+    const showCopySuccess = () => {
+        if (!copyMsg) {
+            return;
+        }
+        copyMsg.classList.remove("hidden");
+        setTimeout(() => copyMsg.classList.add("hidden"), 1500);
+    };
+
+    const copyTextToClipboard = async (text) => {
+        if (navigator.clipboard && window.isSecureContext) {
+            try {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } catch (_) {
+                // Fall through to the selection-based copy path.
+            }
+        }
+
+        if (!filePathInput) {
+            return false;
+        }
+
+        filePathInput.focus({preventScroll: true});
+        filePathInput.select();
+        filePathInput.setSelectionRange(0, text.length);
+        try {
+            return document.execCommand("copy");
+        } finally {
+            filePathInput.setSelectionRange(0, 0);
+            filePathInput.blur();
+        }
+    };
+
     // Toggle UI controls to prevent conflicting actions during long-running jobs
     const controlsDisabled = (disabled) => {
         urlInput.disabled = disabled;
@@ -319,13 +352,9 @@
             if (!text) {
                 return;
             }
-            try {
-                await navigator.clipboard.writeText(text);
-                if (copyMsg) {
-                    copyMsg.classList.remove("hidden");
-                    setTimeout(() => copyMsg.classList.add("hidden"), 1500);
-                }
-            } catch (_) {
+            if (await copyTextToClipboard(text)) {
+                showCopySuccess();
+            } else {
                 pushAlert("error", "Failed to copy to clipboard");
             }
         });

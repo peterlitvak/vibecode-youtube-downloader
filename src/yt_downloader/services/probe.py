@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from yt_dlp import YoutubeDL
 
 from yt_downloader.domain.probe import FormatInfo, ProbeResponse
+from yt_downloader.services.ytdlp_options import base_ytdlp_options
 
 
 def _build_resolution(height: Optional[int]) -> Optional[str]:
@@ -89,9 +90,7 @@ def probe_video(url: str) -> ProbeResponse:
     _validate_url(url)
 
     ydl_opts: dict[str, Any] = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
+        **base_ytdlp_options(),
         "skip_download": True,
     }
 

@@ -11,6 +11,7 @@ from yt_dlp import YoutubeDL
 from yt_downloader.core.config import Settings, get_settings
 from yt_downloader.domain.jobs import Job, JobManager, JobStatus
 from yt_downloader.infra.fs import to_host_display_path
+from yt_downloader.services.ytdlp_options import base_ytdlp_options
 
 
 def _safe_percent(downloaded: int, total: Optional[int]) -> float:
@@ -95,9 +96,7 @@ def _compute_final_outfile(url: str, format_selector: str, target_dir: Path) -> 
 
     base_tmpl: str = _build_base_outtmpl(target_dir)
     probe_opts: dict[str, Any] = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
+        **base_ytdlp_options(),
         "skip_download": True,
         "format": format_selector,
         "merge_output_format": "mp4",
@@ -137,9 +136,7 @@ def _compose_format(url: str, user_selector: str) -> str:
 
     # Probe formats quickly to determine if the selected itag is progressive (has audio)
     probe_opts: dict[str, Any] = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
+        **base_ytdlp_options(),
         "skip_download": True,
     }
     try:
@@ -249,9 +246,7 @@ async def run_download(job: Job, manager: JobManager) -> None:
     final_outfile: Path = _compute_final_outfile(job.url, format_selector, job.target_dir)
 
     ydl_opts: dict[str, Any] = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
+        **base_ytdlp_options(),
         "skip_download": False,
         "format": format_selector,
         "outtmpl": str(final_outfile),

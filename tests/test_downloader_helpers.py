@@ -13,6 +13,7 @@ from yt_downloader.services.downloader import (
     _cleanup_missing_tokens,
     _compose_format,
 )
+from yt_downloader.services.ytdlp_options import base_ytdlp_options
 
 
 class TestDownloaderHelpers(unittest.TestCase):
@@ -83,3 +84,15 @@ class TestDownloaderHelpers(unittest.TestCase):
         """On probe failure, fallback to `<itag>+bestaudio/best`."""
         res: str = _compose_format("https://youtu.be/abc", "18")
         self.assertEqual(res, "18+bestaudio/best")
+
+    def test_base_ytdlp_options_enables_js_runtimes(self) -> None:
+        """Shared yt-dlp options enable available JavaScript runtimes."""
+        opts: dict[str, Any] = base_ytdlp_options()
+        runtimes: dict[str, Any] = opts["js_runtimes"]
+
+        self.assertIn("deno", runtimes)
+        self.assertIn("node", runtimes)
+        self.assertTrue(opts["noplaylist"])
+
+        runtimes.pop("deno")
+        self.assertIn("deno", base_ytdlp_options()["js_runtimes"])

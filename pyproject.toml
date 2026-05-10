@@ -8,10 +8,10 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = ">=3.11,<3.12"
 fastapi = "^0.115.0"
 uvicorn = { extras = ["standard"], version = "^0.30.0" }
-yt-dlp = "*"
+yt-dlp = { version = "*", extras = ["default", "deno"] }
 pydantic = "^2.4.0"
 pydantic-settings = "^2.4.0"
 
